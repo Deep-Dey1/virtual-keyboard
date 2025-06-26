@@ -10,7 +10,7 @@ pygame.init()
 pygame.mixer.init()
 
 # Constants
-WIDTH, HEIGHT = 780, 380
+WIDTH, HEIGHT = 850, 380
 BG_COLOR = (20, 20, 20)
 KEY_COLOR = (40, 40, 40)
 KEY_PRESSED_COLOR = (80, 80, 80)
@@ -18,12 +18,17 @@ GLOW_COLOR = (150, 150, 255)
 TEXT_COLOR = (220, 220, 220)
 ROUND_RADIUS = 15
 KEY_TEXT_COLOR = (240, 240, 240)
-TEXT_DISPLAY_HEIGHT = 60
+TEXT_DISPLAY_HEIGHT = 40
 TEXT_AREA_COLOR = (30, 30, 30)
-GLOW_SIZE = 5
-TITLE_BAR_HEIGHT = 40
+GLOW_SIZE = 2
+TITLE_BAR_HEIGHT = 0
 BUTTON_SIZE = 20
-KEY_SPACING = 3  # Spacing between keys
+KEY_SPACING = 10
+WPM_UPDATE_INTERVAL = 1000
+WPM_FONT_SIZE = 16
+WPM_COLOR = (180, 180, 255)
+WPM_COUNTER_WIDTH = 100
+WPM_COUNTER_HEIGHT = 50  # Same as key_size
 
 # Create the window without title bar
 screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.NOFRAME)
@@ -72,7 +77,7 @@ special_keys_layout = ['SPACE']
 # Key positions and sizes with spacing
 key_positions = {}
 key_size = 60
-start_x = (WIDTH - (len(key_layout[0]) * (key_size + KEY_SPACING))) // 2
+start_x = ((WIDTH - (len(key_layout[0]) * (key_size + KEY_SPACING))) // 2) - 50 
 
 # Create key positions for each alphanumeric row with spacing
 for i, row in enumerate(key_layout):
@@ -91,8 +96,8 @@ for i, row in enumerate(key_layout):
         
         key_positions[key] = {
             'rect': pygame.Rect(
-                row_start_x + j * (key_size + KEY_SPACING),
-                TITLE_BAR_HEIGHT + 20 + i * (key_size + KEY_SPACING),
+                row_start_x + j * (key_size + KEY_SPACING) + 20,
+                TITLE_BAR_HEIGHT + 50 + i * (key_size + KEY_SPACING),
                 width,
                 key_size
             ),
@@ -102,12 +107,26 @@ for i, row in enumerate(key_layout):
             'pressed_image': None
         }
 
+# Adjust ENTER key position to make room for WPM counter
+key_positions['ENTER'] = {
+    'rect': pygame.Rect(
+        WIDTH - ( key_size + 70) - WPM_COUNTER_WIDTH - KEY_SPACING * 2,
+        TITLE_BAR_HEIGHT + 50 + 2 * (key_size + KEY_SPACING),
+        key_size * 1.5,
+        key_size
+    ),
+    'pressed': False,
+    'color': KEY_COLOR,
+    'image': None,
+    'pressed_image': None
+}
+
 # Spacebar (centered below the main keys with spacing)
 space_start_x = (WIDTH - (key_size * 6 + KEY_SPACING * 5)) // 2
 key_positions['SPACE'] = {
     'rect': pygame.Rect(
-        space_start_x,
-        TITLE_BAR_HEIGHT + 20 + 3 * (key_size + KEY_SPACING),
+        space_start_x + 10,
+        TITLE_BAR_HEIGHT + 50 + 3 * (key_size + KEY_SPACING),
         key_size * 6 + KEY_SPACING * 5,
         key_size
     ),
@@ -117,6 +136,14 @@ key_positions['SPACE'] = {
     'pressed_image': None
 }
 
+# WPM counter position
+wpm_counter_rect = pygame.Rect(
+    WIDTH - WPM_COUNTER_WIDTH - 40,
+    TITLE_BAR_HEIGHT + 55 + 2 * (key_size + KEY_SPACING),
+    WPM_COUNTER_WIDTH,
+    WPM_COUNTER_HEIGHT
+)
+
 # Load fonts
 try:
     title_font = pygame.font.SysFont('Consolas', 24, bold=True)
@@ -124,21 +151,37 @@ try:
     key_font = pygame.font.SysFont('Consolas', 18, bold=True)
     special_key_font = pygame.font.SysFont('Consolas', 16, bold=True)
     button_font = pygame.font.SysFont('Consolas', 16, bold=True)
+    wpm_font = pygame.font.SysFont('Consolas', WPM_FONT_SIZE, bold=True)
 except:
     title_font = pygame.font.SysFont('Arial', 24, bold=True)
     font = pygame.font.SysFont('Arial', 24, bold=True)
     key_font = pygame.font.SysFont('Arial', 18, bold=True)
     special_key_font = pygame.font.SysFont('Arial', 16, bold=True)
     button_font = pygame.font.SysFont('Arial', 16, bold=True)
+    wpm_font = pygame.font.SysFont('Arial', WPM_FONT_SIZE, bold=True)
 
 # Text display variables
 typed_text = ""
 text_surface = pygame.Surface((WIDTH * 3, TEXT_DISPLAY_HEIGHT))
 text_surface.fill(TEXT_AREA_COLOR)
-text_x_offset = 0
+text_x_offset = WIDTH * 3    
 cursor_position = 0
-cursor_visible = True
+cursor_visible = False
 cursor_timer = 0
+
+# WPM calculation variables
+last_keypress_time = pygame.time.get_ticks()
+keypress_count = 0
+current_wpm = 0
+last_wpm_update = 0
+
+def calculate_wpm(keypresses, time_elapsed):
+    """Calculate words per minute based on keypresses"""
+    if time_elapsed == 0:
+        return 0
+    minutes = time_elapsed / 60000  # Convert ms to minutes
+    words = keypresses / 6  # Approximate words (5 chars + 1 space)
+    return int(words / minutes)
 
 # Window control buttons
 close_button_rect = pygame.Rect(WIDTH - BUTTON_SIZE - 10, 10, BUTTON_SIZE, BUTTON_SIZE)
@@ -186,20 +229,28 @@ while running:
     pygame.draw.rect(screen, (30, 30, 30), (0, 0, WIDTH, TITLE_BAR_HEIGHT))
     
     # Draw title
-    title_text = title_font.render("VIRTUAL KEYBOARD", True, (220, 220, 220))
+    title_text = title_font.render("YOUR VIRTUAL KEYBOARD", True, (255, 255, 255))
     screen.blit(title_text, (WIDTH // 2 - title_text.get_width() // 2, 10))
     
     # Draw window control buttons
     pygame.draw.rect(screen, (200, 50, 50), close_button_rect, border_radius=10)
     pygame.draw.rect(screen, (200, 200, 50), minimize_button_rect, border_radius=10)
     
-    close_text = button_font.render("X", True, (240, 240, 240))
-    minimize_text = button_font.render("-", True, (240, 240, 240))
+    close_text = button_font.render("X", True, (255, 255, 255))
+    minimize_text = button_font.render("-", True, (255, 255, 255))
     
     screen.blit(close_text, (close_button_rect.centerx - close_text.get_width() // 2, 
                             close_button_rect.centery - close_text.get_height() // 2))
     screen.blit(minimize_text, (minimize_button_rect.centerx - minimize_text.get_width() // 2, 
                                minimize_button_rect.centery - minimize_text.get_height() // 2))
+    
+    # Update WPM calculation
+    current_time = pygame.time.get_ticks()
+    if current_time - last_wpm_update > WPM_UPDATE_INTERVAL:
+        time_elapsed = current_time - last_wpm_update
+        current_wpm = calculate_wpm(keypress_count, time_elapsed)
+        last_wpm_update = current_time
+        keypress_count = 0
     
     # Handle events
     for event in pygame.event.get():
@@ -214,6 +265,7 @@ while running:
                     running = False
                 elif key not in ['LEFT', 'RIGHT', 'SHIFT']:
                     click_sound.play()
+                    keypress_count += 1
                 
                 if key == 'BACK':
                     if cursor_position > 0:
@@ -279,10 +331,10 @@ while running:
                 drag_start_pos = mouse_pos
     
     # Update cursor blink
-    cursor_timer += 1
-    if cursor_timer >= 30:
+    #cursor_timer += 1
+    #if cursor_timer >= 30:
         cursor_visible = not cursor_visible
-        cursor_timer = 0
+        #cursor_timer = 0
     
     # Draw keys with glow effect and spacing
     for key, data in key_positions.items():
@@ -303,6 +355,12 @@ while running:
         text_rect = text_surf.get_rect(center=rect.center)
         screen.blit(text_surf, text_rect)
     
+    # Draw WPM counter to the right of ENTER key
+    pygame.draw.rect(screen, (50, 50, 70), wpm_counter_rect, border_radius=ROUND_RADIUS)
+    wpm_text = wpm_font.render(f"{current_wpm} WPM", True, WPM_COLOR)
+    wpm_text_rect = wpm_text.get_rect(center=wpm_counter_rect.center)
+    screen.blit(wpm_text, wpm_text_rect)
+    
     # Update text display surface
     text_surface.fill(TEXT_AREA_COLOR)
     text_width = font.size(typed_text)[0]
@@ -312,7 +370,7 @@ while running:
     cursor_x = font.size(text_before_cursor)[0] + 20
     
     # Auto-scroll to follow cursor (starting from left)
-    visible_start = -text_x_offset
+    visible_start = text_x_offset
     visible_end = visible_start + WIDTH - 40
     
     # Always show cursor, scrolling when it reaches right 3/4 of window
@@ -338,13 +396,13 @@ while running:
                (0, HEIGHT - TEXT_DISPLAY_HEIGHT))
     
     # Draw scroll indicator if needed
-    if text_width > WIDTH - 40:
-        scroll_ratio = -text_x_offset / (text_width - (WIDTH - 40))
-        scrollbar_width = 100
-        scrollbar_x = (WIDTH - scrollbar_width) * scroll_ratio
+    # if text_width > WIDTH - 40:
+    #     scroll_ratio = -text_x_offset / (text_width - (WIDTH - 40))
+    #     scrollbar_width = 100
+    #     scrollbar_x = (WIDTH - scrollbar_width) * scroll_ratio
         
-        pygame.draw.rect(screen, (80, 80, 80), (0, HEIGHT - 5, WIDTH, 5))
-        pygame.draw.rect(screen, (150, 150, 150), (scrollbar_x, HEIGHT - 5, scrollbar_width, 5))
+    #     pygame.draw.rect(screen, (80, 80, 80), (0, HEIGHT - 5, WIDTH, 5))
+    #     pygame.draw.rect(screen, (150, 150, 150), (scrollbar_x, HEIGHT - 5, scrollbar_width, 5))
     
     pygame.display.flip()
     clock.tick(60)
